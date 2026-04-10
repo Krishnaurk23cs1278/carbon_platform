@@ -1,0 +1,85 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Run Pytest
+        run: |
+          cd backend
+          pytest test_main.py
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Login to ACR
+        run: az acr login -n ${{ secrets.ACR_NAME }}
+      - name: Build and Push Backend
+        run: |
+          docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/carbon-backend:${{ github.sha }} ./backend
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/carbon-backend:${{ github.sha }}
+          docker tag ${{ secrets.ACR_NAME }}.azurecr.io/carbon-backend:${{ github.sha }} ${{ secrets.ACR_NAME }}.azurecr.io/carbon-backend:latest
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/carbon-backend:latest
+      - name: Build and Push Frontend
+        run: |
+          docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/carbon-frontend:${{ github.sha }} ./frontend
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/carbon-frontend:${{ github.sha }}
+          docker tag ${{ secrets.ACR_NAME }}.azurecr.io/carbon-frontend:${{ github.sha }} ${{ secrets.ACR_NAME }}.azurecr.io/carbon-frontend:latest
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/carbon-frontend:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Setup kubelogin
+        uses: azure/use-kubelogin@v1
+        with:
+          kubelogin-version: 'v0.0.24'
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Get AKS Credentials
+        run: |
+          az aks get-credentials --resource-group ${{ secrets.AZURE_RG }} --name ${{ secrets.AKS_NAME }} --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+      - name: Install dependencies
+        run: pip install kubernetes
+      - name: Substitute ACR Names
+        run: |
+          sed -i 's|myacr.azurecr.io|${{ secrets.ACR_NAME }}.azurecr.io|g' k8s/backend.yaml
+          sed -i 's|myacr.azurecr.io|${{ secrets.ACR_NAME }}.azurecr.io|g' k8s/frontend.yaml
+      - name: Run Ansible Playbook
+        run: |
+          sudo apt-get update && sudo apt-get install -y ansible
+          ansible-galaxy collection install kubernetes.core
+          ansible-playbook -i ansible/inventory ansible/deploy.yaml
+      - name: Verify Deployment
+        run: |
+          kubectl get pods -n default
+          kubectl get svc -n default
