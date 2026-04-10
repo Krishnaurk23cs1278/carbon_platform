@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  db:
+    image: mongo:latest
+    container_name: carbon_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - carbon_network
+
+  backend:
+    build: ./backend
+    container_name: carbon_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://db:27017/carbon_db
+    depends_on:
+      - db
+    networks:
+      - carbon_network
+
+  frontend:
+    build: ./frontend
+    container_name: carbon_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - carbon_network
+
+volumes:
+  mongo_data:
+
+networks:
+  carbon_network:
+    driver: bridge
