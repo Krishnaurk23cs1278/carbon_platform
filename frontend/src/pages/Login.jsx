@@ -14,7 +14,7 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      const resp = await api.post('/auth/login', { username: '', email, password });
+      const resp = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', resp.data.access_token);
       navigate('/');
     } catch (err) {

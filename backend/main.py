@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from database import connect_to_mongo, close_mongo_connection, get_db
-from models import CarbonEntry, CarbonResponse, UserCreate, Token, IoTSensorData, AlertThreshold
+from models import CarbonEntry, CarbonResponse, UserCreate, LoginRequest, Token, IoTSensorData, AlertThreshold
 from ai_module import CarbonAI
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 from report_generator import generate_pdf_report
@@ -104,7 +104,7 @@ async def signup(user: UserCreate):
     return {"message": "User created successfully"}
 
 @app.post("/api/auth/login", response_model=Token)
-async def login(user: UserCreate):
+async def login(user: LoginRequest):
     db = get_db()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -277,6 +277,27 @@ async def get_leaderboard():
             "green_score": doc.get("green_score", 50.0),
         })
     return leaders
+
+@app.get("/api/carbon/community")
+async def get_community_stats():
+    """Get aggregated data across all users for comparison."""
+    db = get_db()
+    if db is None: return {"avg_carbon": 15.0, "total_saved_kg": 0}
+    
+    pipeline = [
+        {"$group": {"_id": None, "avg_carbon": {"$avg": "$total_carbon_kg"}, "total_entries": {"$sum": 1}}}
+    ]
+    cursor = db.carbon_entries.aggregate(pipeline)
+    res = await cursor.to_list(length=1)
+    
+    if not res:
+        return {"avg_carbon": 15.0, "total_saved_kg": 0}
+        
+    return {
+        "avg_carbon": round(res[0]["avg_carbon"], 2),
+        "total_entries": res[0]["total_entries"],
+        "total_saved_kg": round(res[0]["total_entries"] * 5.5, 2) 
+    }
 
 @app.get("/api/carbon/predict")
 async def predict_emissions(user_id: str = Depends(get_current_user_id)):
