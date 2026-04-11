@@ -4,7 +4,7 @@ services:
     image: mongo:latest
     container_name: carbon_mongo
     ports:
-      - "27017:27017"
+      - "27018:27017"
     volumes:
       - mongo_data:/data/db
     networks:
@@ -26,7 +26,7 @@ services:
     build: ./frontend
     container_name: carbon_frontend
     ports:
-      - "80:80"
+      - "9595:80"
     depends_on:
       - backend
     networks:
